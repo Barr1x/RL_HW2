@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from tqdm import tqdm
 
 
 
@@ -33,6 +34,7 @@ class PolicyGradient(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_layer_size, action_size),
             # BEGIN STUDENT SOLUTION
+            nn.Softmax(dim=-1)
             # END STUDENT SOLUTION
         )
 
@@ -46,6 +48,8 @@ class PolicyGradient(nn.Module):
 
         # initialize networks, optimizers, move networks to device
         # BEGIN STUDENT SOLUTION
+        self.actor = self.actor.to(device)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=lr_actor)
         # END STUDENT SOLUTION
 
 
@@ -56,8 +60,14 @@ class PolicyGradient(nn.Module):
     def get_action(self, state, stochastic):
         # if stochastic, sample using the action probabilities, else get the argmax
         # BEGIN STUDENT SOLUTION
+        action_probs = self.actor(state)
+        if stochastic:
+            action = torch.distributions.Categorical(action_probs).sample()
+        else:
+            action = torch.argmax(action_probs)
+        return action
         # END STUDENT SOLUTION
-        pass
+    
 
 
     def calculate_n_step_bootstrap(self, rewards_tensor, values):
@@ -70,8 +80,25 @@ class PolicyGradient(nn.Module):
     def train(self, states, actions, rewards):
         # train the agent using states, actions, and rewards
         # BEGIN STUDENT SOLUTION
+        states = torch.tensor(states, dtype=torch.float32, device=self.device)
+        actions = torch.tensor(actions, dtype=torch.int64, device=self.device)
+        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
+
+        action_probs = self.actor(states)
+        log_probs = torch.log(action_probs.gather(1, actions.unsqueeze(1)))
+
+        returns = torch.zeros_like(rewards)
+        cumulative = 0
+        for t in reversed(range(len(rewards))):
+            cumulative = rewards[t] + self.gamma * cumulative
+            returns[t] = cumulative
+
+        actor_loss = -torch.mean(log_probs * returns)
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+        self.actor_optimizer.step()
         # END STUDENT SOLUTION
-        pass
+        
 
 
     def run(self, env, max_steps, num_episodes, train):
@@ -79,6 +106,32 @@ class PolicyGradient(nn.Module):
 
         # run the agent through the environment num_episodes times for at most max steps
         # BEGIN STUDENT SOLUTION
+        for episode in range(num_episodes):
+            state, _ = env.reset()
+            episode_states = []
+            episode_actions = []
+            episode_rewards = []
+            
+
+            for step in range(max_steps):
+                action = self.get_action(torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0), train)
+                action = action.item()
+
+                next_state, reward, done, _, _ = env.step(action)
+                
+                episode_states.append(state)
+                episode_actions.append(action)
+                episode_rewards.append(reward)
+
+                state = next_state
+
+                if done:
+                    break
+
+            if train:
+                self.train(episode_states, episode_actions, episode_rewards)  
+
+            total_rewards.append(sum(episode_rewards))
         # END STUDENT SOLUTION
         return(total_rewards)
 
@@ -89,6 +142,21 @@ def graph_agents(graph_name, agents, env, max_steps, num_episodes):
 
     # graph the data mentioned in the homework pdf
     # BEGIN STUDENT SOLUTION
+    D = []
+    for agent in agents:
+        temp = []
+        print(f'Running new agent\n')
+        for count in tqdm(range(0, 3500, 100)):
+            agent.run(env, max_steps, 100, True)
+            test_returns = agent.run(env, max_steps, 20, False)
+            print(f'Average Return: {np.mean(test_returns)}\n')
+            temp += [np.mean(test_returns)]
+        D.append(temp)
+    D = np.array(D)
+    average_total_rewards = np.mean(D, axis=0)
+    min_total_rewards = np.min(D, axis=0)
+    max_total_rewards = np.max(D, axis=0)
+    graph_every = 100
     # END STUDENT SOLUTION
 
     # plot the total rewards
@@ -115,9 +183,8 @@ def parse_args():
     parser.add_argument('--num_runs', type=int, default=5, help='Number of runs to average over for graph')
     parser.add_argument('--num_episodes', type=int, default=3500, help='Number of episodes to train for')
     parser.add_argument('--max_steps', type=int, default=200, help='Maximum number of steps in the environment')
-    parser.add_argument('--env_name', type=str, default='CartPole-v1', help='Environment name')
+    parser.add_argument('--env_name', type=str, default='CartPole-v0', help='Environment name')
     return parser.parse_args()
-
 
 
 def main():
@@ -125,6 +192,11 @@ def main():
 
     # init args, agents, and call graph_agents on the initialized agents
     # BEGIN STUDENT SOLUTION
+    env = gym.make(args.env_name)
+    agents = []
+    for i in range(args.num_runs):
+        agents.append(PolicyGradient(env.observation_space.shape[0], env.action_space.n, mode=args.mode, n=args.n))
+    graph_agents(args.env_name, agents, env, args.max_steps, args.num_episodes)
     # END STUDENT SOLUTION
 
 
