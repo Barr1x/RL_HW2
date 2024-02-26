@@ -62,6 +62,9 @@ class DeepQNetwork(nn.Module):
             nn.Linear(state_size, hidden_layer_size),
             nn.ReLU(),
             # BEGIN STUDENT SOLUTION
+            nn.Linear(hidden_layer_size, hidden_layer_size), 
+            nn.ReLU(),
+            nn.Linear(hidden_layer_size, action_size)
             # END STUDENT SOLUTION
         )
 
