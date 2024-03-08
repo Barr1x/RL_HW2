@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 
 class PolicyGradient(nn.Module):
-    def __init__(self, state_size, action_size, lr_actor=1e-3, lr_critic=1e-3, mode='REINFORCE', n=128, gamma=0.99, device='cpu'):
+    def __init__(self, state_size, action_size, lr_actor=1e-3, lr_critic=1e-3, mode='REINFORCE', n = 1, gamma=0.99, device='cpu'):
         super(PolicyGradient, self).__init__()
 
         self.state_size = state_size
@@ -44,13 +44,19 @@ class PolicyGradient(nn.Module):
             nn.Linear(state_size, hidden_layer_size),
             nn.ReLU(),
             # BEGIN STUDENT SOLUTION
+            nn.Linear(hidden_layer_size, 1),
             # END STUDENT SOLUTION
         )
 
         # initialize networks, optimizers, move networks to device
         # BEGIN STUDENT SOLUTION
+
         self.actor = self.actor.to(device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=lr_actor)
+
+        self.critic = self.critic.to(device) #critic
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr = lr_critic) #critic
+        
         # END STUDENT SOLUTION
 
 
@@ -74,8 +80,21 @@ class PolicyGradient(nn.Module):
     def calculate_n_step_bootstrap(self, rewards_tensor, values):
         # calculate n step bootstrap
         # BEGIN STUDENT SOLUTION
+        T = len(rewards_tensor)
+        results = torch.zeros_like(rewards_tensor)
+        for t in range (T):
+            if (t + self.n < T):
+                V_end = values[t + self.n]
+            else:
+                V_end = 0
+
+            upper_bound = min(T, t + self.n)
+            for k in range(t, upper_bound):
+                results[t] = results[t] + (self.gamma ** (k - t)) * rewards_tensor[k]
+            results[t] = results[t] + (self.gamma ** (self.n)) * V_end
+        return results
         # END STUDENT SOLUTION
-        pass
+        
 
 
     def train(self, states, actions, rewards):
@@ -88,22 +107,26 @@ class PolicyGradient(nn.Module):
         action_probs = self.actor(states)
         log_probs = torch.log(torch.gather(action_probs, 1, actions.unsqueeze(1)))
         log_probs = log_probs.squeeze()
-        #print(log_probs)
+
+        value = self.critic(states) #critic
+        value = torch.squeeze(value) #critic
         
-        returns = torch.zeros_like(rewards)
-        cumulative = 0
-        for t in reversed(range(len(rewards))):
-            cumulative = rewards[t] + self.gamma * cumulative
-            returns[t] = cumulative
+        bootstrap_returns = self.calculate_n_step_bootstrap(rewards, value) #critic
         
-        #print(returns)
-        #print(log_probs*returns)
-        actor_loss = -torch.mean(log_probs * returns.detach())
+        # print("log_prob", log_probs)
+        # print("bootstrap_returns", bootstrap_returns)
+        # print("value", value)
+        # sys.exit(1)
+        actor_loss = -torch.mean(log_probs * bootstrap_returns.detach() - log_probs * value.detach()) #critic
+        critic_loss = torch.mean((bootstrap_returns.detach() - value)**2) #critic
         
-        #sys.exit(1)
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
+
+        self.critic_optimizer.zero_grad() #critic
+        critic_loss.backward()
+        self.critic_optimizer.step() #critic
         # END STUDENT SOLUTION
         
 
@@ -202,7 +225,7 @@ def main():
     env = gym.make(args.env_name)
     agents = []
     for i in range(args.num_runs):
-        agents.append(PolicyGradient(env.observation_space.shape[0], env.action_space.n, mode=args.mode, n=args.n))
+        agents.append(PolicyGradient(env.observation_space.shape[0], env.action_space.n, mode="A2C", n=1))
     graph_agents(args.env_name, agents, env, args.max_steps, args.num_episodes)
     # END STUDENT SOLUTION
 

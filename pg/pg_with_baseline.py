@@ -49,8 +49,18 @@ class PolicyGradient(nn.Module):
 
         # initialize networks, optimizers, move networks to device
         # BEGIN STUDENT SOLUTION
+        self.baseline = nn.Sequential(
+            nn.Linear(state_size, hidden_layer_size),
+            nn.ReLU(),
+            nn.Linear(hidden_layer_size, 1),
+        )
+
         self.actor = self.actor.to(device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=lr_actor)
+
+        self.baseline = self.baseline.to(device) #baseline
+        self.baseline_optimizer = torch.optim.Adam(self.baseline.parameters(), lr = lr_actor) #baseline
+        
         # END STUDENT SOLUTION
 
 
@@ -88,6 +98,10 @@ class PolicyGradient(nn.Module):
         action_probs = self.actor(states)
         log_probs = torch.log(torch.gather(action_probs, 1, actions.unsqueeze(1)))
         log_probs = log_probs.squeeze()
+
+        b_t = self.baseline(states) #baseline
+        b_t = torch.squeeze(b_t) #baseline
+        
         #print(log_probs)
         
         returns = torch.zeros_like(rewards)
@@ -96,14 +110,21 @@ class PolicyGradient(nn.Module):
             cumulative = rewards[t] + self.gamma * cumulative
             returns[t] = cumulative
         
-        #print(returns)
+        print("log_prob", log_probs)
+        print("returns", returns)
+        print("b_t", b_t)
+        sys.exit(1)
         #print(log_probs*returns)
-        actor_loss = -torch.mean(log_probs * returns.detach())
+        actor_loss = -torch.mean(log_probs * returns.detach() - log_probs * b_t.detach()) #baseline
+        b_loss = torch.mean((returns.detach() - b_t)**2) #baseline
         
-        #sys.exit(1)
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
+
+        self.baseline_optimizer.zero_grad() #baseline
+        b_loss.backward() #baseline
+        self.baseline_optimizer.step() #baseline
         # END STUDENT SOLUTION
         
 
@@ -202,7 +223,7 @@ def main():
     env = gym.make(args.env_name)
     agents = []
     for i in range(args.num_runs):
-        agents.append(PolicyGradient(env.observation_space.shape[0], env.action_space.n, mode=args.mode, n=args.n))
+        agents.append(PolicyGradient(env.observation_space.shape[0], env.action_space.n, mode="REINFORCE_WITH_BASELINE", n=args.n))
     graph_agents(args.env_name, agents, env, args.max_steps, args.num_episodes)
     # END STUDENT SOLUTION
 
